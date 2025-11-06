@@ -156,12 +156,10 @@ def api_service_types(request):
     try:
         svc_qs = ServiceType.objects.filter(is_active=True).order_by('name')
         service_types = [{'name': s.name, 'estimated_minutes': s.estimated_minutes or 0} for s in svc_qs]
-        # include addons
-        from .models import ServiceAddon, InventoryItem
-        addon_qs = ServiceAddon.objects.all().order_by('name')
+
+        addon_qs = ServiceAddon.objects.filter(is_active=True).order_by('name')
         service_addons = [{'name': a.name, 'estimated_minutes': a.estimated_minutes or 0} for a in addon_qs]
 
-        # include inventory items with brands
         items_qs = InventoryItem.objects.select_related('brand').filter(is_active=True).order_by('brand__name', 'name')
         inventory_items = []
         for item in items_qs:
@@ -173,13 +171,14 @@ def api_service_types(request):
                 'quantity': item.quantity or 0
             })
 
+        logger.debug(f"api_service_types: Returning {len(inventory_items)} inventory items")
         return JsonResponse({
             'service_types': service_types,
             'service_addons': service_addons,
             'inventory_items': inventory_items
         })
     except Exception as e:
-        logger.error(f"Error fetching service types: {e}")
+        logger.error(f"Error fetching service types: {e}", exc_info=True)
         return JsonResponse({
             'service_types': [],
             'service_addons': [],
