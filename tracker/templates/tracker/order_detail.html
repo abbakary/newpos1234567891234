@@ -1049,6 +1049,71 @@
   </div>
 </div>
 
+<script>
+(function(){
+  const footerBtn = document.getElementById('footerSignAndComplete');
+  const signAndCompleteBtn = document.getElementById('signAndCompleteBtn');
+  const completeForm = document.getElementById('completeForm');
+  const hiddenOverrun = document.getElementById('completeOverrunHidden');
+  const overrunModalEl = document.getElementById('completeOverrunModal');
+  const overrunModal = overrunModalEl ? new bootstrap.Modal(overrunModalEl) : null;
+  const overrunTextarea = document.getElementById('completeOverrunReason');
+  const overrunError = document.getElementById('completeOverrunError');
+
+  const startedAtStr = '{{ order.started_at.isoformat if order.started_at else "" }}';
+  const estimatedDuration = {{ order.estimated_duration|default:'null' }};
+
+  function needsOverrun(){
+    if ('{{ order.type }}' !== 'service' || !estimatedDuration) return false;
+    if (!startedAtStr) return false;
+    try{
+      const started = new Date(startedAtStr);
+      const now = new Date();
+      const elapsed = Math.floor((now - started)/60000);
+      return elapsed > Number(estimatedDuration);
+    }catch(e){ return false; }
+  }
+
+  function ensureAndSubmit(){
+    if (!needsOverrun()){
+      completeForm.submit();
+      return;
+    }
+    // if order already has overrun reason on server, hiddenOverrun may be set via template; check it
+    if (hiddenOverrun && hiddenOverrun.value) { completeForm.submit(); return; }
+    // show modal
+    if (overrunModal) overrunModal.show();
+  }
+
+  // Attach handlers
+  if (footerBtn) footerBtn.addEventListener('click', ensureAndSubmit);
+  if (signAndCompleteBtn) signAndCompleteBtn.addEventListener('click', ensureAndSubmit);
+
+  if (overrunModal && document.getElementById('completeOverrunSave')){
+    document.getElementById('completeOverrunSave').addEventListener('click', function(){
+      const v = (overrunTextarea.value||'').trim();
+      overrunError.style.display = 'none';
+      if (!v){ overrunError.textContent = 'Please provide a reason.'; overrunError.style.display = ''; return; }
+      // Set hidden input and submit the form
+      if (hiddenOverrun) hiddenOverrun.value = v;
+      // Also try to persist via AJAX to API (best-effort)
+      fetch('{% url "tracker:api_report_overrun" order_id=order.id %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ reason: v })
+      }).finally(() => {
+        if (overrunModal) overrunModal.hide();
+        completeForm.submit();
+      });
+    });
+  }
+})();
+</script>
+
 <!-- Sign Existing Document Modal -->
 <div class="modal fade" id="signExistingModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-xl">
