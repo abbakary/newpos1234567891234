@@ -738,7 +738,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if (!completeBtn) return;
 
   const orderStarted = {{ order.started_at|default:'None'|yesno:'true,false' }}; // placeholder, will compute below
-  const startedAtStr = '{{ order.started_at.isoformat if order.started_at else "" }}';
+  const startedAtStr = '{{ order.started_at|date:"c" }}';
   const estimatedDuration = {{ order.estimated_duration|default:'null' }};
 
   function redirectToSignature(){
