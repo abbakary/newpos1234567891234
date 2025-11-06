@@ -1413,16 +1413,17 @@ def customer_register(request: HttpRequest):
                 model = request.POST.get("model", "").strip()
                 vehicle_type = request.POST.get("vehicle_type", "").strip()
                 
-                # Create vehicle if any vehicle information is provided
+                # Create vehicle if any vehicle information is provided using centralized service
+                from .services import VehicleService
                 if plate_number or make or model or vehicle_type:
-                    v = Vehicle.objects.create(
+                    v = VehicleService.create_or_get_vehicle(
                         customer=c,
                         plate_number=plate_number or None,
                         make=make or None,
                         model=model or None,
                         vehicle_type=vehicle_type or None
                     )
-                
+
                 # Create order based on intent and service type
                 o = None
                 description = request.POST.get("description", "").strip()
