@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice {{ invoice.invoice_number }}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: white;
+      padding: 20px;
+    }
+
+    .invoice-container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      padding: 40px;
+      border: 1px solid #e0e0e0;
+    }
+
+    /* Header */
+    .invoice-header {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-bottom: 40px;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 20px;
+    }
+
+    .company-info h2 {
+      font-size: 20px;
+      color: #007bff;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .company-info p {
+      font-size: 12px;
+      margin: 3px 0;
+      color: #555;
+    }
+
+    .invoice-info {
+      text-align: right;
+      font-size: 12px;
+    }
+
+    .invoice-info h3 {
+      font-size: 24px;
+      color: #007bff;
+      margin-bottom: 10px;
+    }
+
+    .invoice-info-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 5px 0;
+      padding: 2px 0;
+    }
+
+    .invoice-info-row strong {
+      color: #333;
+    }
+
+    /* Customer Section */
+    .customer-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-bottom: 40px;
+    }
+
+    .customer-block {
+      font-size: 12px;
+    }
+
+    .customer-block h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .customer-block p {
+      margin: 3px 0;
+      line-height: 1.5;
+    }
+
+    /* Line Items Table */
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 30px;
+      font-size: 12px;
+    }
+
+    .items-table thead {
+      background-color: #f5f5f5;
+      border-top: 2px solid #007bff;
+      border-bottom: 2px solid #007bff;
+    }
+
+    .items-table th {
+      padding: 10px;
+      text-align: left;
+      font-weight: 700;
+      color: #333;
+      border: none;
+    }
+
+    .items-table th.text-right {
+      text-align: right;
+    }
+
+    .items-table tbody tr {
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .items-table tbody tr:last-child {
+      border-bottom: 2px solid #007bff;
+    }
+
+    .items-table td {
+      padding: 10px;
+      vertical-align: top;
+    }
+
+    .items-table td.text-right {
+      text-align: right;
+    }
+
+    .items-table tbody tr:nth-child(odd) {
+      background-color: #f9f9f9;
+    }
+
+    /* Totals */
+    .totals-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 40px;
+      font-size: 12px;
+    }
+
+    .totals-box {
+      width: 300px;
+    }
+
+    .totals-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .totals-row.total {
+      border-top: 2px solid #007bff;
+      border-bottom: 2px solid #007bff;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 10px 0;
+      color: #007bff;
+    }
+
+    .totals-row strong {
+      color: #333;
+    }
+
+    .totals-row.total strong {
+      color: #007bff;
+    }
+
+    /* Payment Section */
+    .payment-notes-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-bottom: 30px;
+      font-size: 12px;
+    }
+
+    .payment-block h4,
+    .notes-block h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .payment-block p,
+    .notes-block p {
+      margin: 3px 0;
+      line-height: 1.5;
+    }
+
+    /* Footer */
+    .invoice-footer {
+      text-align: center;
+      font-size: 11px;
+      color: #999;
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    /* Print Styles */
+    @media print {
+      body {
+        padding: 0;
+        background: white;
+      }
+
+      .invoice-container {
+        border: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .no-print {
+        display: none;
+      }
+    }
+
+    /* Screen only styles */
+    @media screen {
+      .print-button {
+        margin-bottom: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  {% if not print_mode %}
+  <div class="print-button no-print" style="text-align: center; margin-bottom: 20px;">
+    <button onclick="window.print()" class="btn btn-primary" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+      <i class="fa fa-print" style="margin-right: 5px;"></i> Print Invoice
+    </button>
+  </div>
+  {% endif %}
+
+  <div class="invoice-container">
+    <!-- Header with Company Info and Invoice Number -->
+    <div class="invoice-header">
+      <div class="company-info">
+        <h2>SUPERDOLL TRAILER MANUFACTURE CO. (T) LTD.</h2>
+        <p>P.O. Box 16541 DSM, Tanzania</p>
+        <p>Tel: +255-22-2860930-2863467</p>
+        <p>Fax: +255-22-2865412/3</p>
+        <p>Email: stm@superdoll-tz.com</p>
+        <p>Tax ID No. 100-199-157</p>
+        <p>VAT Reg. No. 10-0085-15-E</p>
+      </div>
+      <div class="invoice-info">
+        <h3>INVOICE</h3>
+        <div class="invoice-info-row">
+          <strong>Invoice #:</strong>
+          <span>{{ invoice.invoice_number }}</span>
+        </div>
+        <div class="invoice-info-row">
+          <strong>Date:</strong>
+          <span>{{ invoice.invoice_date|date:"d/m/Y" }}</span>
+        </div>
+        {% if invoice.due_date %}
+        <div class="invoice-info-row">
+          <strong>Due Date:</strong>
+          <span>{{ invoice.due_date|date:"d/m/Y" }}</span>
+        </div>
+        {% endif %}
+        {% if invoice.reference %}
+        <div class="invoice-info-row">
+          <strong>Reference:</strong>
+          <span>{{ invoice.reference }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Customer Information -->
+    <div class="customer-section">
+      <div class="customer-block">
+        <h4>Bill To:</h4>
+        <p><strong>{{ invoice.customer.full_name }}</strong></p>
+        {% if invoice.customer.organization_name %}
+        <p>{{ invoice.customer.organization_name }}</p>
+        {% endif %}
+        <p>{{ invoice.customer.phone }}</p>
+        {% if invoice.customer.email %}
+        <p>{{ invoice.customer.email }}</p>
+        {% endif %}
+        {% if invoice.customer.address %}
+        <p>{{ invoice.customer.address }}</p>
+        {% endif %}
+      </div>
+
+      {% if invoice.vehicle %}
+      <div class="customer-block">
+        <h4>Vehicle Information:</h4>
+        <p><strong>Plate Number:</strong> {{ invoice.vehicle.plate_number }}</p>
+        <p><strong>Make:</strong> {{ invoice.vehicle.make|default:"—" }}</p>
+        <p><strong>Model:</strong> {{ invoice.vehicle.model|default:"—" }}</p>
+        <p><strong>Type:</strong> {{ invoice.vehicle.vehicle_type|default:"—" }}</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Line Items Table -->
+    {% if invoice.line_items.all %}
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Unit</th>
+          <th class="text-right">Unit Price</th>
+          <th class="text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in invoice.line_items.all %}
+        <tr>
+          <td><strong>{{ item.description }}</strong></td>
+          <td class="text-right">{{ item.quantity }}</td>
+          <td class="text-right">{{ item.unit|default:"—" }}</td>
+          <td class="text-right">{{ item.unit_price|floatformat:2 }}</td>
+          <td class="text-right"><strong>{{ item.line_total|floatformat:2 }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Totals -->
+    <div class="totals-section">
+      <div class="totals-box">
+        <div class="totals-row">
+          <strong>Subtotal:</strong>
+          <span>{{ invoice.subtotal|floatformat:2 }}</span>
+        </div>
+        {% if invoice.tax_rate > 0 %}
+        <div class="totals-row">
+          <strong>Tax ({{ invoice.tax_rate }}%):</strong>
+          <span>{{ invoice.tax_amount|floatformat:2 }}</span>
+        </div>
+        {% endif %}
+        <div class="totals-row total">
+          <strong>TOTAL:</strong>
+          <span>{{ invoice.total_amount|floatformat:2 }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payment and Notes -->
+    <div class="payment-notes-section">
+      {% if invoice.payment %}
+      <div class="payment-block">
+        <h4>Payment Details:</h4>
+        <p><strong>Method:</strong> {{ invoice.payment.get_payment_method_display }}</p>
+        <p><strong>Amount:</strong> {{ invoice.payment.amount|floatformat:2 }}</p>
+        {% if invoice.payment.payment_date %}
+        <p><strong>Date:</strong> {{ invoice.payment.payment_date|date:"d/m/Y" }}</p>
+        {% endif %}
+        {% if invoice.payment.reference %}
+        <p><strong>Reference:</strong> {{ invoice.payment.reference }}</p>
+        {% endif %}
+        {% if invoice.payment.notes %}
+        <p><strong>Notes:</strong> {{ invoice.payment.notes }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if invoice.notes or invoice.terms %}
+      <div class="notes-block">
+        {% if invoice.notes %}
+        <h4>Notes:</h4>
+        <p>{{ invoice.notes }}</p>
+        {% endif %}
+        {% if invoice.terms %}
+        <h4 style="margin-top: 20px;">Terms & Conditions:</h4>
+        <p>{{ invoice.terms }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Footer -->
+    <div class="invoice-footer">
+      <p>Thank you for your business!</p>
+      <p>Generated on {{ "now"|date:"d/m/Y H:i" }}</p>
+    </div>
+  </div>
+</body>
+</html>
