@@ -315,29 +315,33 @@ class InvoiceExtractor:
     def extract_all(self, text: str) -> Dict:
         """
         Extract all available fields from invoice text.
-        
+
         Args:
             text: Raw invoice text
-        
+
         Returns:
             Dictionary with extracted fields
         """
         self._load_patterns_from_db()
-        
+
         extracted = {
             'plate_number': self.extract_field(text, 'plate_number'),
             'customer_name': self.extract_field(text, 'customer_name'),
             'customer_phone': self.extract_field(text, 'customer_phone'),
             'customer_email': self.extract_field(text, 'customer_email'),
+            'customer_tel': self.extract_customer_tel(text),
             'address': self.extract_field(text, 'address'),
             'service_description': self.extract_field(text, 'service_description'),
             'item_name': self.extract_field(text, 'service_description'),
             'quantity': self.extract_field(text, 'quantity'),
             'amount': str(self.extract_amount(text)) if self.extract_amount(text) else None,
             'reference': self.extract_field(text, 'reference'),
-            # provide both keys so mappers downstream can populate either
             'code_no': self.extract_field(text, 'code_no'),
-            'customer_code': self.extract_field(text, 'code_no')
+            'customer_code': self.extract_field(text, 'code_no'),
+            'pi_no': self.extract_pi_no(text),
+            'invoice_date': self.extract_invoice_date(text),
+            'del_date': self.extract_del_date(text),
+            'attended_by': self.extract_attended_by(text),
         }
 
         # Fallback: some layouts put value on the next line after the label
