@@ -150,13 +150,6 @@ urlpatterns = [
     path("api/orders/auto-fill-extraction/", views_start_order.api_auto_fill_from_extraction, name="api_auto_fill_extraction"),
     path("api/orders/started/kpis/", views_start_order.api_started_orders_kpis, name="api_started_orders_kpis"),
 
-    # Quick Start Integration
-    path("customer/register-with-extraction/", views_quick_start.customer_register_with_extraction, name="customer_register_extraction"),
-    path("customer/register-with-extraction/<str:vehicle_plate>/", views_quick_start.customer_register_with_extraction, name="customer_register_extraction_plate"),
-    path("orders/create-with-extraction/", views_quick_start.order_create_with_extraction, name="order_create_extraction"),
-    path("api/quick-start/auto-fill-order/", views_quick_start.auto_fill_order_from_extraction, name="api_auto_fill_order"),
-    path("api/quick-start/detect-customer-mismatch/", views_quick_start.detect_and_merge_customer_data, name="api_detect_mismatch"),
-    path("api/quick-start/apply-customer-merge/", views_quick_start.apply_customer_data_merge, name="api_apply_merge"),
 
     # Invoices
     path("invoices/create/", views_invoice.invoice_create, name="invoice_create"),
