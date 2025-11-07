@@ -535,12 +535,15 @@ class DocumentExtractionItem(models.Model):
     """Store individual extracted line items for a document extraction."""
     extraction = models.ForeignKey(DocumentExtraction, on_delete=models.CASCADE, related_name='items')
     line_no = models.PositiveIntegerField(null=True, blank=True, help_text='Line number in document (if available)')
-    code = models.CharField(max_length=128, blank=True, null=True, db_index=True)
-    description = models.TextField(blank=True, null=True)
-    qty = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    unit = models.CharField(max_length=16, blank=True, null=True)
-    rate = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
-    value = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    code = models.CharField(max_length=128, blank=True, null=True, db_index=True, help_text='Item code from invoice')
+    description = models.TextField(blank=True, null=True, help_text='Item description')
+    qty = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text='Quantity')
+    unit = models.CharField(max_length=16, blank=True, null=True, help_text='Unit (PCS, PKG, etc)')
+    rate = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, help_text='Rate/Unit Price (Rate TSH)')
+    value = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, help_text='Line value (Value TSH)')
+    net_value = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, help_text='Net value (Net Value)')
+    vat = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, help_text='VAT amount')
+    gross_value = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, help_text='Gross value (Gross Value)')
 
     class Meta:
         ordering = ['extraction', 'line_no']
