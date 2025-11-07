@@ -192,8 +192,8 @@
     </div>
   </div>
 
-  <!-- Search & Filters Section -->
-  <div class="row g-3 mb-3">
+  <!-- Search & Filters Section - Regular Orders -->
+  <div id="regularOrdersFilters" class="row g-3 mb-3" style="{% if order_view_mode == 'started' %}display: none;{% endif %}">
     <div class="col-12">
       <div class="card shadow-sm">
         <div class="card-header bg-light">
@@ -201,6 +201,7 @@
         </div>
         <div class="card-body">
           <form method="get">
+            <input type="hidden" name="view" value="regular">
             <div class="row g-3 align-items-end">
               <div class="col-xl-2 col-lg-4 col-md-6">
                 <label class="form-label fw-medium">Status</label>
