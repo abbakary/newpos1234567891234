@@ -275,6 +275,58 @@
     </div>
   </div>
 
+  <!-- Search & Filters Section - Started Orders -->
+  <div id="startedOrdersFilters" class="row g-3 mb-3" style="{% if order_view_mode != 'started' %}display: none;{% endif %}">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-header bg-light">
+          <h6 class="mb-0"><i class="fa fa-filter me-2"></i>Search & Filters</h6>
+        </div>
+        <div class="card-body">
+          <form method="get">
+            <input type="hidden" name="view" value="started">
+            <div class="row g-3 align-items-end">
+              <div class="col-xl-3 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Search by Plate Number</label>
+                <input type="text" name="plate_search" class="form-control" placeholder="Enter plate number" value="{{ plate_search|default:'' }}">
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Status</label>
+                <select name="status" class="form-select">
+                  <option value="all" {% if started_status == 'all' %}selected{% endif %}>All</option>
+                  <option value="created" {% if started_status == 'created' %}selected{% endif %}>Created</option>
+                  <option value="in_progress" {% if started_status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                  <option value="completed" {% if started_status == 'completed' %}selected{% endif %}>Completed</option>
+                </select>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <label class="form-label fw-medium">Sort By</label>
+                <select name="sort_by" class="form-select">
+                  <option value="-started_at" {% if started_sort == '-started_at' %}selected{% endif %}>Newest First</option>
+                  <option value="started_at" {% if started_sort == 'started_at' %}selected{% endif %}>Oldest First</option>
+                  <option value="plate_number" {% if started_sort == 'plate_number' %}selected{% endif %}>Plate</option>
+                  <option value="customer_name" {% if started_sort == 'customer_name' %}selected{% endif %}>Customer</option>
+                </select>
+              </div>
+              <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="d-flex gap-2 h-100 pt-3">
+                  <button class="btn btn-primary flex-fill" type="submit">
+                    <i class="fa fa-search me-1"></i> Search
+                  </button>
+                  {% if request.GET.plate_search or request.GET.status %}
+                  <a href="{% url 'tracker:orders_list' %}?view=started" class="btn btn-outline-secondary" title="Clear Filters">
+                    <i class="fa fa-times"></i>
+                  </a>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Orders Table -->
   <div class="card shadow-sm">
     <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
