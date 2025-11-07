@@ -513,6 +513,9 @@ def process_invoice_extraction(document_scan) -> Dict:
                     qty = it.get('qty')
                     rate = it.get('rate') or it.get('rate_tsh')
                     value = it.get('value') or it.get('amount') or it.get('value_tsh')
+                    net_val = it.get('net_value')
+                    vat_val = it.get('vat')
+                    gross_val = it.get('gross_value')
 
                     def _to_decimal(v):
                         try:
@@ -528,6 +531,9 @@ def process_invoice_extraction(document_scan) -> Dict:
                     qty_d = _to_decimal(qty)
                     rate_d = _to_decimal(rate)
                     value_d = _to_decimal(value)
+                    net_d = _to_decimal(net_val)
+                    vat_d = _to_decimal(vat_val)
+                    gross_d = _to_decimal(gross_val)
 
                     normalized_items.append({
                         'line_no': idx,
@@ -537,6 +543,9 @@ def process_invoice_extraction(document_scan) -> Dict:
                         'unit': it.get('unit') or None,
                         'rate': rate_d,
                         'value': value_d,
+                        'net_value': net_d,
+                        'vat': vat_d,
+                        'gross_value': gross_d,
                     })
 
                 if normalized_items:
