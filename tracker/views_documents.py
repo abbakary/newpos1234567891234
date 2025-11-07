@@ -299,6 +299,181 @@ def verify_and_update_extraction(request):
 def search_by_job_card(request):
     return JsonResponse({'success': False, 'error': 'Search by job card disabled'}, status=410)
 @login_required
+@require_http_methods(["GET"])
+def api_get_extraction(request):
+    """API endpoint to get extraction data for a document"""
+    try:
+        extraction_id = request.GET.get('extraction_id')
+        if not extraction_id:
+            return JsonResponse({'success': False, 'error': 'extraction_id required'}, status=400)
+
+        extraction = get_object_or_404(DocumentExtraction, id=int(extraction_id))
+
+        return JsonResponse({
+            'success': True,
+            'extraction': {
+                'id': extraction.id,
+                'extracted_customer_name': extraction.extracted_customer_name,
+                'extracted_customer_phone': extraction.extracted_customer_phone,
+                'extracted_customer_email': extraction.extracted_customer_email,
+                'extracted_vehicle_plate': extraction.extracted_vehicle_plate,
+                'extracted_vehicle_make': extraction.extracted_vehicle_make,
+                'extracted_vehicle_model': extraction.extracted_vehicle_model,
+                'extracted_order_description': extraction.extracted_order_description,
+                'extracted_item_name': extraction.extracted_item_name,
+                'extracted_brand': extraction.extracted_brand,
+                'extracted_quantity': extraction.extracted_quantity,
+                'extracted_amount': extraction.extracted_amount,
+                'code_no': extraction.code_no,
+                'reference': extraction.reference,
+                'net_value': str(extraction.net_value) if extraction.net_value else None,
+                'vat_amount': str(extraction.vat_amount) if extraction.vat_amount else None,
+                'gross_value': str(extraction.gross_value) if extraction.gross_value else None,
+                'confidence_overall': extraction.confidence_overall,
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting extraction: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_create_invoice_from_extraction(request):
+    """API endpoint to create an invoice from extracted data"""
+    try:
+        data = json.loads(request.body or '{}')
+        extraction_id = data.get('extraction_id')
+        order_id = data.get('order_id')
+
+        if not extraction_id:
+            return JsonResponse({'success': False, 'error': 'extraction_id required'}, status=400)
+
+        extraction = get_object_or_404(DocumentExtraction, id=int(extraction_id))
+        user_branch = get_user_branch(request.user)
+
+        # Get or create customer from extraction
+        from .services import CustomerService, VehicleService
+
+        cust_name = extraction.extracted_customer_name or 'Customer'
+        cust_phone = extraction.extracted_customer_phone or ''
+        cust_email = extraction.extracted_customer_email or None
+        cust_addr = extraction.extracted_customer_address or None
+
+        try:
+            customer, _ = CustomerService.create_or_get_customer(
+                branch=user_branch,
+                full_name=cust_name,
+                phone=cust_phone,
+                email=cust_email,
+                address=cust_addr,
+                customer_type='personal'
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create customer: {e}")
+            customer = Customer.objects.create(
+                branch=user_branch,
+                full_name=cust_name,
+                phone=cust_phone,
+                email=cust_email,
+                address=cust_addr,
+                customer_type='personal'
+            )
+
+        # Get or create vehicle from extraction
+        vehicle = None
+        if extraction.extracted_vehicle_plate:
+            try:
+                vehicle = VehicleService.create_or_get_vehicle(
+                    customer=customer,
+                    plate_number=extraction.extracted_vehicle_plate,
+                    make=extraction.extracted_vehicle_make or '',
+                    model=extraction.extracted_vehicle_model or '',
+                    vehicle_type=extraction.extracted_data_json.get('vehicle_type') if extraction.extracted_data_json else ''
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create vehicle: {e}")
+
+        # Get existing order if provided
+        order = None
+        if order_id:
+            try:
+                order = Order.objects.get(id=order_id, branch=user_branch)
+            except Order.DoesNotExist:
+                pass
+
+        # Create invoice
+        with transaction.atomic():
+            invoice = Invoice.objects.create(
+                branch=user_branch,
+                order=order,
+                customer=customer,
+                vehicle=vehicle,
+                reference=data.get('reference') or extraction.reference or extraction.extracted_vehicle_plate or '',
+                invoice_date=timezone.now().date(),
+                due_date=data.get('due_date') or None,
+                tax_rate=data.get('tax_rate') or 0,
+                attended_by=data.get('attended_by') or '',
+                kind_attention=data.get('kind_attention') or '',
+                notes=data.get('notes') or '',
+                terms=data.get('terms') or (
+                    "NOTE 1 : Payment in TSHS accepted at the prevailing rate on the date of payment. "
+                    "2 : Proforma Invoice is Valid for 2 weeks from date of Proforma. "
+                    "3 : Discount is Valid only for the above Quantity. "
+                    "4 : Duty and VAT exemption documents to be submitted with the Purchase Order."
+                ),
+                created_by=request.user,
+            )
+            invoice.generate_invoice_number()
+            invoice.save()
+
+            # Create line items from extracted items
+            try:
+                items = extraction.items.all()
+                if items:
+                    for item in items:
+                        InvoiceLineItem.objects.create(
+                            invoice=invoice,
+                            description=item.description or '',
+                            item_type='custom',
+                            quantity=item.qty or 1,
+                            unit=item.unit or 'PCS',
+                            unit_price=item.rate or 0,
+                            tax_rate=invoice.tax_rate,
+                        )
+                elif extraction.extracted_amount or extraction.gross_value:
+                    # Create a single line item if we have amount but no itemized details
+                    amount = extraction.gross_value or extraction.extracted_amount or 0
+                    try:
+                        amount_decimal = Decimal(str(amount))
+                    except Exception:
+                        amount_decimal = Decimal('0')
+
+                    InvoiceLineItem.objects.create(
+                        invoice=invoice,
+                        description=extraction.extracted_order_description or 'Service',
+                        item_type='custom',
+                        quantity=1,
+                        unit='Unit',
+                        unit_price=amount_decimal,
+                        tax_rate=invoice.tax_rate,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to create line items: {e}")
+
+        return JsonResponse({
+            'success': True,
+            'invoice_id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'message': 'Invoice created successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Error creating invoice from extraction: {str(e)}")
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+@login_required
 @require_http_methods(["POST"])
 def start_quick_order(request):
     """Start a quick order with job card number, to be filled later with document"""
