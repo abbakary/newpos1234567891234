@@ -1041,6 +1041,13 @@ function submitCreateInvoiceForm() {
       kind_attention: formData.get('kind_attention'),
       notes: formData.get('notes'),
       terms: formData.get('terms'),
+      extracted_customer: (data && data.customer) ? data.customer : null,
+      extracted_phone: (data && data.phone) ? data.phone : null,
+      extracted_plate: (data && data.plate) ? data.plate : null,
+      extracted_description: (data && data.description) ? data.description : null,
+      net_value: (data && data.net_value) ? data.net_value : null,
+      vat_amount: (data && data.vat_amount) ? data.vat_amount : null,
+      gross_value: (data && data.gross_value) ? data.gross_value : null,
       items: items
     })
   })
