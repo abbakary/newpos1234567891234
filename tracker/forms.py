@@ -1240,8 +1240,9 @@ class InvoiceForm(forms.ModelForm):
 
     class Meta:
         model = Invoice
-        fields = ['reference', 'due_date', 'tax_rate', 'attended_by', 'kind_attention', 'remarks', 'notes', 'terms']
+        fields = ['invoice_date', 'reference', 'due_date', 'tax_rate', 'attended_by', 'kind_attention', 'remarks', 'notes', 'terms']
         widgets = {
+            'invoice_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date', 'placeholder': 'dd/mm/yyyy'}),
             'reference': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Customer PO or reference'}),
             'due_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'tax_rate': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0', 'max': '100'}),
