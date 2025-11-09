@@ -789,13 +789,27 @@ def parse_invoice_data(text: str) -> dict:
 
                 try:
                     float_numbers = [float(n.replace(',', '')) for n in numbers]
+
+                    # First number might be an item code (if it's a large number)
+                    # Try to identify and extract code
+                    code = None
+                    remaining_numbers = float_numbers
+
+                    if len(float_numbers) >= 3:
+                        # Check if first number looks like an item code (3-6 digits)
+                        first = float_numbers[0]
+                        if 100 <= first <= 999999 and first == int(first):
+                            if (100 <= first <= 999) or (3000 <= first <= 50000) or (10000 <= first <= 999999):
+                                code = str(int(first))
+                                remaining_numbers = float_numbers[1:]
+
                     # Treat largest number as value
-                    value = max(float_numbers)
+                    value = max(remaining_numbers) if remaining_numbers else 0
                     qty = None
                     rate = None
 
-                    # If we have multiple numbers, try to identify qty and rate
-                    if len(float_numbers) == 2:
+                    # If we have multiple remaining numbers, try to identify qty and rate
+                    if len(remaining_numbers) == 2:
                         # Could be qty + value, or rate + value
                         if float_numbers[0] < 100 and float_numbers[0] == int(float_numbers[0]):
                             qty = int(float_numbers[0])
