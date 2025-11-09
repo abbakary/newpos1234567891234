@@ -314,7 +314,30 @@ def api_create_invoice_from_upload(request):
                     payment = InvoicePayment()
                     payment.invoice = inv
                     payment.amount = Decimal('0')  # Default to unpaid (amount 0)
-                    payment.payment_method = 'on_delivery'  # Default payment method
+
+                    # Map extracted payment method or use form value or default
+                    extracted_method = request.POST.get('payment_method', '').strip().lower() or 'on_delivery'
+                    payment_method_map = {
+                        'cash': 'cash',
+                        'cheque': 'cheque',
+                        'chq': 'cheque',
+                        'bank': 'bank_transfer',
+                        'transfer': 'bank_transfer',
+                        'card': 'card',
+                        'mpesa': 'mpesa',
+                        'credit': 'on_credit',
+                        'delivery': 'on_delivery',
+                        'cod': 'on_delivery',
+                        'on_delivery': 'on_delivery',
+                    }
+
+                    # Try to match the extracted method to a valid choice
+                    payment.payment_method = 'on_delivery'  # Default
+                    for key, val in payment_method_map.items():
+                        if key in extracted_method:
+                            payment.payment_method = val
+                            break
+
                     payment.payment_date = None
                     payment.reference = None
                     payment.save()
