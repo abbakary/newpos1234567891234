@@ -980,6 +980,7 @@ def extract_from_bytes(file_bytes, filename: str = '') -> dict:
             'reference': parsed.get('reference'),
             'subtotal': parsed.get('subtotal'),
             'tax': parsed.get('tax'),
+            'tax_rate': parsed.get('tax_rate'),
             'total': parsed.get('total'),
             'payment_method': parsed.get('payment_method'),
             'delivery_terms': parsed.get('delivery_terms'),
