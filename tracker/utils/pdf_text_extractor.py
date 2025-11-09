@@ -87,122 +87,373 @@ def extract_text_from_image(file_bytes) -> str:
 
 def parse_invoice_data(text: str) -> dict:
     """Parse invoice data from extracted text using pattern matching.
-    
+
     This method uses regex patterns to extract invoice fields from raw text.
-    It's designed to work with common invoice formats.
-    
+    It's designed to work with professional invoice formats, especially:
+    - Pro forma invoices with Code No, Customer Name, Address, Tel, Reference
+    - Traditional invoices with Invoice Number, Date, Customer, etc.
+
     Args:
         text: Raw extracted text from PDF/image
-        
+
     Returns:
         dict with extracted invoice data
     """
     if not text or not text.strip():
         return {
             'invoice_no': None,
+            'code_no': None,
             'date': None,
             'customer_name': None,
             'address': None,
+            'phone': None,
+            'email': None,
+            'reference': None,
             'subtotal': None,
             'tax': None,
             'total': None,
             'items': []
         }
-    
-    # Helper to find first match group
-    def find(pattern):
-        m = re.search(pattern, text, re.I | re.MULTILINE)
-        return m.group(1).strip() if m else None
-    
-    # Extract invoice number
-    invoice_no = (
-        find(r'(?:Invoice\s*(?:Number|No\.?|#)[\s:\-]*)?([A-Z0-9\-\/]+?)(?:\s|$|[\n\r])') or
-        find(r'(?:PI|PI\.?|Code\s*No|Code)[\s:\-]*([A-Z0-9\-]+)') or
-        None
-    )
-    
-    # Extract date
-    date_str = find(r'(?:Date|Invoice\s*Date)[\s:\-]*([0-3]?\d[\-/][01]?\d[\-/]\d{2,4})')
-    
+
+    normalized_text = text.strip()
+    lines = normalized_text.split('\n')
+
+    # Clean and normalize lines
+    cleaned_lines = []
+    for line in lines:
+        cleaned = line.strip()
+        # Merge lines that are continuations (very short or just whitespace)
+        if cleaned and len(cleaned) > 2:
+            cleaned_lines.append(cleaned)
+
+    # Helper to find field value - try multiple strategies including searching ahead
+    def extract_field_value(label_patterns, text_to_search=None, max_distance=10):
+        """Extract value after a label using flexible pattern matching and distance-based search.
+
+        This handles cases where PDF extraction scrambles text ordering.
+        It looks for the label, then finds the most likely value nearby in the text.
+        """
+        search_text = text_to_search or normalized_text
+        patterns = label_patterns if isinstance(label_patterns, list) else [label_patterns]
+
+        for pattern in patterns:
+            # Strategy 1: Look for "Label: Value" or "Label = Value"
+            m = re.search(rf'{pattern}\s*[:=]\s*([^\n:{{]+)', search_text, re.I | re.MULTILINE)
+            if m and m.group(1).strip():
+                value = m.group(1).strip()
+                # Clean up trailing labels
+                value = re.sub(r'\s+(?:Tel|Fax|Del|Ref|Date|Kind|Attended|Type|Payment|Delivery|Reference|PI|Cust|Qty|Rate|Value)\b.*$', '', value, flags=re.I).strip()
+                if value:
+                    return value
+
+            # Strategy 2: "Label Value" (space separated, often in scrambled PDFs)
+            m = re.search(rf'{pattern}\s+(?![:=])([A-Z][^\n:{{]*?)(?=\n[A-Z]|\s{2,}[A-Z]|\n$|$)', search_text, re.I | re.MULTILINE)
+            if m and m.group(1).strip():
+                value = m.group(1).strip()
+                # Remove any trailing keywords
+                value = re.sub(r'\s+(?:Tel|Fax|Del|Ref|Date|Kind|Attended|Type|Payment|Delivery|Reference|PI|Cust|Qty|Rate|Value|SR|NO)\b.*$', '', value, flags=re.I).strip()
+                if value and len(value) > 2:
+                    return value
+
+            # Strategy 3: Find label, then look for value on next non-empty line
+            lines = search_text.split('\n')
+            for i, line in enumerate(lines):
+                if re.search(pattern, line, re.I):
+                    # Check if value is on same line (after label)
+                    m = re.search(rf'{pattern}\s*[:=]?\s*(.+)$', line, re.I)
+                    if m:
+                        value = m.group(1).strip()
+                        if value and value.upper() not in (':', '=', '') and not re.match(r'^(?:Tel|Fax|Del|Ref|Date)\b', value, re.I):
+                            return value
+
+                    # Look for value on next 2-3 lines (handles scrambled layouts)
+                    for j in range(1, min(4, len(lines) - i)):
+                        next_line = lines[i + j].strip()
+                        if next_line and not re.match(r'^[A-Z]+[a-zA-Z\s]*\s*[:=]', next_line):
+                            # This looks like a value line
+                            if len(next_line) > 2 and not re.match(r'^(?:Tel|Fax|Del|Ref|Date|SR|NO|Code|Customer|Address)\b', next_line, re.I):
+                                return next_line
+                        elif re.match(r'^[A-Z]+[a-zA-Z\s]*\s*[:=]', next_line):
+                            # Hit another label, stop searching
+                            break
+
+        return None
+
+    # Extract Code No (specific pattern for Superdoll invoices)
+    code_no = extract_field_value([
+        r'Code\s*No',
+        r'Code\s*#',
+        r'Code(?:\s|:)'
+    ])
+
     # Extract customer name
-    customer_name = (
-        find(r'(?:Customer\s*Name|Customer|Bill\s*To|Buyer|Name)[\s:\-]*([^\n\r\:]{3,120})') or
-        find(r'(?:To\s*[:.\s]+)([^\n\r]{3,100})')
-    )
+    customer_name = extract_field_value([
+        r'Customer\s*Name',
+        r'Bill\s*To',
+        r'Buyer\s*Name'
+    ])
 
-    # Extract address
-    address = find(r'(?:Address|Addr\.|Add|Location)[\s:\-]*([^\n\r]{5,200})')
+    # Extract address (look for lines after "Address" label)
+    address = None
+    for i, line in enumerate(cleaned_lines):
+        if re.search(r'^Address\s*[:=]?', line, re.I):
+            # Get this line value and next lines if they're not labels
+            addr_parts = []
+            m = re.search(r'^Address\s*[:=]?\s*(.+)$', line, re.I)
+            if m:
+                addr_parts.append(m.group(1).strip())
+            # Collect next 2-3 lines as address continuation
+            for j in range(1, 4):
+                if i + j < len(cleaned_lines):
+                    next_line = cleaned_lines[i + j]
+                    # Stop if it's a new label
+                    if re.match(r'^[A-Z]+[a-zA-Z\s]*\s*[:=]', next_line) or re.match(r'^(?:Tel|Fax|Del|Kind|Attended|Reference)', next_line, re.I):
+                        break
+                    # Stop if it's an obviously different section (all caps, ends with colon)
+                    if next_line.isupper() and ':' in next_line:
+                        break
+                    addr_parts.append(next_line)
+            address = ' '.join(addr_parts)
+            if address:
+                break
 
-    # Extract phone
-    phone = find(r'(?:Tel|Phone|Mobile|Contact|Phone\s*Number)[\s:\-]*(\+?[0-9\s\-\(\)]{7,20})')
+    # Extract phone/tel
+    phone = extract_field_value(r'(?:Tel|Telephone)')
+    if phone:
+        # Remove "Fax" part if followed by fax number
+        phone = re.sub(r'\s+Fax\s+.*$', '', phone, flags=re.I).strip()
+        # Validate
+        if phone and not re.search(r'\d{5,}', phone):
+            phone = None
 
     # Extract email
-    email = find(r'(?:Email|E-mail|Contact\s*Email)[\s:\-]*([^\s\n\r:@]+@[^\s\n\r:]+)')
-    
-    # Extract monetary amounts
-    subtotal = find(r'(?:Sub\s*Total|Subtotal|Net\s*(?:Value|Amount))[\s:\-]*([0-9\,]+\.?\d{0,2})')
-    tax = find(r'(?:VAT|Tax|GST|Sales\s*Tax)[\s:\-]*([0-9\,]+\.?\d{0,2})')
-    total = find(r'(?:Total|Grand\s*Total|Amount\s*Due|Total\s*Amount)[\s:\-]*(?:TSH|TZS|UGX)?\s*([0-9\,]+\.?\d{0,2})')
-    
-    # Parse monetary values
+    email = None
+    email_match = re.search(r'([\w\.-]+@[\w\.-]+\.\w+)', normalized_text)
+    if email_match:
+        email = email_match.group(1)
+
+    # Extract reference
+    reference = extract_field_value(r'(?:Reference|Ref\.?|For|FOR)')
+
+    # Extract PI No. / Invoice Number
+    invoice_no = extract_field_value([
+        r'PI\s*(?:No|Number|#)',
+        r'Invoice\s*(?:No|Number)'
+    ])
+
+    # Extract Date (multiple formats)
+    date_str = None
+    # Look for date patterns
+    date_patterns = [
+        r'Date\s*[:=]?\s*(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})',
+        r'Invoice\s*Date\s*[:=]?\s*(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})',
+        r'(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})',  # Fallback: any date pattern
+    ]
+    for pattern in date_patterns:
+        m = re.search(pattern, normalized_text, re.I)
+        if m:
+            date_str = m.group(1)
+            break
+
+    # Parse monetary values helper
     def to_decimal(s):
         try:
             if s:
-                return Decimal(str(s).replace(',', ''))
+                # Remove currency symbols and extra characters, keep only numbers, dot, comma
+                cleaned = re.sub(r'[^\d\.\,\-]', '', str(s)).strip()
+                if cleaned and cleaned not in ('.', ',', '-'):
+                    return Decimal(cleaned.replace(',', ''))
         except Exception:
             pass
         return None
-    
-    # Extract line items (simple heuristic)
+
+    # Extract monetary amounts using flexible patterns (handles scrambled PDFs)
+    def find_amount(label_patterns):
+        """Find monetary amount after label patterns - works with scrambled PDF text"""
+        patterns = (label_patterns if isinstance(label_patterns, list) else [label_patterns])
+        for pattern in patterns:
+            # Try with colon separator: "Label: Amount"
+            m = re.search(rf'{pattern}\s*:\s*(?:TSH|TZS|UGX)?\s*([0-9\,\.]+)', normalized_text, re.I | re.MULTILINE)
+            if m:
+                return m.group(1)
+
+            # Try with equals: "Label = Amount"
+            m = re.search(rf'{pattern}\s*=\s*(?:TSH|TZS|UGX)?\s*([0-9\,\.]+)', normalized_text, re.I | re.MULTILINE)
+            if m:
+                return m.group(1)
+
+            # Try with space and optional currency on same line
+            m = re.search(rf'{pattern}\s+(?:TSH|TZS|UGX)?\s*([0-9\,\.]+)', normalized_text, re.I | re.MULTILINE)
+            if m:
+                return m.group(1)
+
+            # Try finding amount on next line (for scrambled PDFs)
+            lines = normalized_text.split('\n')
+            for i, line in enumerate(lines):
+                if re.search(pattern, line, re.I):
+                    # Check for amount on same line
+                    m = re.search(rf'{pattern}\s*[:=]?\s*([0-9\,\.]+)', line, re.I)
+                    if m:
+                        return m.group(1)
+
+                    # Check next 2 lines for amount
+                    for j in range(1, 3):
+                        if i + j < len(lines):
+                            next_line = lines[i + j].strip()
+                            # Look for amount pattern
+                            if re.match(r'^(?:TSH|TZS|UGX)?\s*([0-9\,\.]+)', next_line, re.I):
+                                m = re.match(r'^(?:TSH|TZS|UGX)?\s*([0-9\,\.]+)', next_line, re.I)
+                                if m:
+                                    return m.group(1)
+        return None
+
+    # Extract Net Value / Subtotal
+    subtotal = to_decimal(find_amount([
+        r'Net\s*Value',
+        r'Net\s*Amount',
+        r'Subtotal',
+        r'Net\s*:'
+    ]))
+
+    # Extract VAT / Tax
+    tax = to_decimal(find_amount([
+        r'VAT',
+        r'Tax',
+        r'GST',
+        r'Sales\s*Tax'
+    ]))
+
+    # Extract Gross Value / Total
+    total = to_decimal(find_amount([
+        r'Gross\s*Value',
+        r'Total\s*Amount',
+        r'Grand\s*Total',
+        r'Total\s*(?::|\s)'
+    ]))
+
+    # Extract line items with improved detection for scrambled PDFs
     items = []
-    lines = text.split('\n')
     item_section_started = False
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
+    item_header_idx = -1
+    current_item = {}
+
+    for idx, line in enumerate(lines):
+        line_stripped = line.strip()
+        if not line_stripped:
+            # Empty line might signal end of current item
+            if current_item and ('description' in current_item or 'value' in current_item):
+                # Finalize current item if we have enough info
+                if current_item.get('description') and (current_item.get('value') or current_item.get('qty')):
+                    items.append(current_item)
+                    current_item = {}
             continue
-        
-        # Detect item section start
-        if re.search(r'\b(Item|Description|Qty|Quantity|Unit|Price|Amount|Value)\b', line, re.I):
+
+        # Detect item section header
+        keyword_count = sum([
+            1 if re.search(r'\b(?:Sr|S\.N|Serial)\b', line_stripped, re.I) else 0,
+            1 if re.search(r'\b(?:Item|Code)\b', line_stripped, re.I) else 0,
+            1 if re.search(r'\b(?:Description|Desc)\b', line_stripped, re.I) else 0,
+            1 if re.search(r'\b(?:Qty|Quantity)\b', line_stripped, re.I) else 0,
+            1 if re.search(r'\b(?:Rate|Price|Unit)\b', line_stripped, re.I) else 0,
+            1 if re.search(r'\b(?:Value|Amount)\b', line_stripped, re.I) else 0,
+        ])
+
+        if keyword_count >= 3:
             item_section_started = True
+            item_header_idx = idx
             continue
-        
-        # Stop at total/footer
-        if item_section_started and re.search(r'\b(Sub\s*Total|Total|Grand\s*Total|VAT|Tax|Payment)\b', line, re.I):
-            break
-        
-        # Try to parse line as item
-        if item_section_started and len(line) > 5:
-            # Find numbers in the line
-            numbers = re.findall(r'[0-9\,]+\.?\d*', line)
-            if len(numbers) >= 1:  # At least a quantity or amount
-                # Extract description (remove all numbers)
-                desc = re.sub(r'[0-9\,]+\.?\d*', '', line).strip()
+
+        # Stop at totals/summary section
+        if item_section_started and idx > item_header_idx + 1:
+            if re.search(r'(?:Net\s*Value|Gross\s*Value|Payment|Delivery|Remarks|NOTE)', line_stripped, re.I):
+                # Finalize any pending item
+                if current_item and ('description' in current_item or 'value' in current_item):
+                    items.append(current_item)
+                break
+
+        # Parse item lines (after header starts)
+        if item_section_started and idx > item_header_idx:
+            # Look for numeric patterns - could be sr no, code, qty, rate, or value
+            numbers = re.findall(r'[0-9\,]+\.?\d*', line_stripped)
+
+            # Extract text (non-numeric part)
+            text_only = re.sub(r'[0-9\,]+\.?\d*', '|', line_stripped)
+            text_parts = [p.strip() for p in text_only.split('|') if p.strip()]
+
+            # Case 1: Line looks like "Sr Code Description Qty Rate Value" (table row)
+            if len(numbers) >= 2 and text_parts:
+                # Try to identify what the numbers represent
+                # Usually: Sr#, ItemCode, Qty, Rate, Value
+                # Extract numeric values more carefully
+
+                # Description is text parts joined
+                desc = ' '.join(text_parts)
                 if desc and len(desc) > 2:
-                    # Last number is usually value
-                    value = numbers[-1] if numbers else None
-                    qty = None
-                    # Second-to-last might be qty
+                    # Extract numbers - usually qty and value are smaller/larger respectively
+                    value = numbers[-1] if len(numbers) >= 1 else None
+                    qty = 1
+
+                    # If 2+ numbers, second-to-last might be qty
                     if len(numbers) >= 2:
-                        qty = numbers[-2]
-                    
-                    items.append({
+                        try:
+                            qty_candidate = float(numbers[-2].replace(',', ''))
+                            if 0.1 < qty_candidate < 10000:
+                                if '.' not in numbers[-2] or qty_candidate.is_integer():
+                                    qty = int(qty_candidate) if qty_candidate.is_integer() else qty_candidate
+                        except Exception:
+                            pass
+
+                    current_item = {
                         'description': desc[:255],
-                        'qty': int(float(qty.replace(',', ''))) if qty else 1,
+                        'qty': qty if isinstance(qty, int) else int(qty) if isinstance(qty, float) and qty.is_integer() else 1,
                         'value': to_decimal(value)
-                    })
-    
+                    }
+                    items.append(current_item)
+                    current_item = {}
+
+            # Case 2: Line is purely descriptive text (likely description for current item)
+            elif text_parts and not numbers:
+                # This is likely a description line
+                desc_text = ' '.join(text_parts)
+                if desc_text and len(desc_text) > 2:
+                    if 'description' not in current_item:
+                        current_item['description'] = desc_text[:255]
+                    else:
+                        # Append to existing description
+                        current_item['description'] = (current_item['description'] + ' ' + desc_text)[:255]
+
+            # Case 3: Line with just numbers (could be qty, rate, or value)
+            elif numbers and not text_parts:
+                # Try to figure out what this number represents
+                # Usually small numbers are qty, large numbers are values/rates
+                try:
+                    num_val = float(numbers[0].replace(',', ''))
+                    if 0.1 < num_val < 1000 and '.' not in numbers[0]:
+                        # Looks like a quantity
+                        current_item['qty'] = int(num_val)
+                    else:
+                        # Looks like a monetary amount
+                        if 'value' not in current_item:
+                            current_item['value'] = to_decimal(numbers[0])
+                except Exception:
+                    pass
+
+    # Finalize any pending item
+    if current_item and ('description' in current_item or 'value' in current_item):
+        items.append(current_item)
+
     return {
         'invoice_no': invoice_no,
+        'code_no': code_no,
         'date': date_str,
         'customer_name': customer_name,
         'phone': phone,
         'email': email,
         'address': address,
-        'subtotal': to_decimal(subtotal),
-        'tax': to_decimal(tax),
-        'total': to_decimal(total),
+        'reference': reference,
+        'subtotal': subtotal,
+        'tax': tax,
+        'total': total,
         'items': items
     }
 
@@ -283,11 +534,13 @@ def extract_from_bytes(file_bytes, filename: str = '') -> dict:
             # Prepare header with all extracted fields
             header = {
                 'invoice_no': parsed.get('invoice_no'),
+                'code_no': parsed.get('code_no'),
                 'date': parsed.get('date'),
                 'customer_name': parsed.get('customer_name'),
                 'phone': parsed.get('phone'),
                 'email': parsed.get('email'),
                 'address': parsed.get('address'),
+                'reference': parsed.get('reference'),
                 'subtotal': parsed.get('subtotal'),
                 'tax': parsed.get('tax'),
                 'total': parsed.get('total'),

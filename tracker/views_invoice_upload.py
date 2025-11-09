@@ -84,16 +84,18 @@ def api_extract_invoice_preview(request):
     # Return extracted preview data
     header = extracted.get('header') or {}
     items = extracted.get('items') or []
-    
+
     return JsonResponse({
         'success': True,
         'message': 'Invoice data extracted successfully',
         'header': {
             'invoice_no': header.get('invoice_no'),
+            'code_no': header.get('code_no'),
             'customer_name': header.get('customer_name'),
             'phone': header.get('phone'),
             'email': header.get('email'),
             'address': header.get('address'),
+            'reference': header.get('reference'),
             'date': header.get('date'),
             'subtotal': float(header.get('subtotal') or 0),
             'tax': float(header.get('tax') or 0),
