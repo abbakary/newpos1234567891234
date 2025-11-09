@@ -676,19 +676,23 @@
                 if (applyBtn){
                   applyBtn.addEventListener('click', function(){
                     const d = window.__lastInvoiceExtraction || {};
-                    if (!d) return;
-                    // Map header fields to form inputs
+                    if (!d || !d.header) return;
+                    const hdr = d.header;
+                    // Map extracted header fields to form inputs
                     const map = {
-                      'customer_full_name': d.header.customer_name || '',
-                      'customer_address': d.header.address || '',
-                      'reference': d.header.invoice_no || d.header.code_no || '',
-                      'customer_phone': ''
+                      'customer_full_name': hdr.customer_name || '',
+                      'customer_phone': hdr.phone || '',
+                      'customer_email': hdr.email || '',
+                      'customer_address': hdr.address || '',
+                      'reference': hdr.invoice_no || hdr.code_no || ''
                     };
                     const f = document.querySelector('form');
-                    Object.keys(map).forEach(k=>{ const el = f.querySelector('[name="'+k+'"]'); if (el) el.value = map[k]; });
-                    // populate line items area? leave for manual add
+                    Object.keys(map).forEach(k=>{ const el = f.querySelector('[name="'+k+'"]'); if (el) { el.value = map[k]; el.dispatchEvent(new Event('input', {bubbles: true})); } });
+                    // Switch back to manual mode
                     reviewModal && reviewModal.hide();
-                    document.getElementById('mode-manual').checked=true; document.getElementById('mode-upload').checked=false; document.getElementById('uploadSection').classList.add('d-none');
+                    document.getElementById('mode-manual').checked=true;
+                    document.getElementById('mode-upload').checked=false;
+                    document.getElementById('uploadSection').classList.add('d-none');
                   });
                 }
 
