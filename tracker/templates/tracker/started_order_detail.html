@@ -853,7 +853,19 @@
 
                   // Populate invoice fields
                   manualForm.querySelector('input[name="invoice_number"]').value = header.invoice_no || header.code_no || '';
-                  manualForm.querySelector('input[name="invoice_date"]').value = header.date || '';
+
+                  // Handle invoice_date - convert from dd/mm/yyyy to yyyy-mm-dd for HTML date input
+                  let invoiceDateValue = '';
+                  if (header.date) {
+                    const dateMatch = String(header.date).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                    if (dateMatch) {
+                      invoiceDateValue = dateMatch[3] + '-' + String(dateMatch[2]).padStart(2, '0') + '-' + String(dateMatch[1]).padStart(2, '0');
+                    } else {
+                      invoiceDateValue = header.date;
+                    }
+                  }
+                  manualForm.querySelector('input[name="invoice_date"]').value = invoiceDateValue;
+
                   manualForm.querySelector('input[name="subtotal"]').value = header.subtotal || '';
                   manualForm.querySelector('input[name="tax_amount"]').value = header.tax || '';
                   manualForm.querySelector('input[name="total_amount"]').value = header.total || '';
