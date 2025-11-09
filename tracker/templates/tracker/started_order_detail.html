@@ -597,11 +597,13 @@
                   // Show loading state
                   startedUploadBtn.disabled = true;
                   uploadProgress.style.display = 'block';
+                  uploadProgressBar.style.width = '50%';
                   const originalBtnText = startedUploadBtn.innerHTML;
-                  startedUploadBtn.innerHTML = '<i class="fa fa-spinner fa-spin me-2"></i>Processing...';
+                  startedUploadBtn.innerHTML = '<i class="fa fa-spinner fa-spin me-2"></i>Extracting...';
 
                   try {
-                    const response = await fetch('{% url "tracker:api_upload_extract_invoice" %}', {
+                    // Step 1: Extract preview data
+                    const extractResponse = await fetch('{% url "tracker:api_extract_invoice_preview" %}', {
                       method: 'POST',
                       body: fd,
                       headers: {
@@ -610,29 +612,28 @@
                       }
                     });
 
-                    const data = await response.json();
+                    uploadProgressBar.style.width = '100%';
+                    const extractData = await extractResponse.json();
 
-                    if (data && data.success){
-                      // Invoice created successfully
-                      showError('<i class="fa fa-check-circle me-2"></i>Invoice created successfully! Redirecting...', false);
-                      setTimeout(function(){
-                        window.location.href = data.redirect_url || ('/tracker/invoices/' + data.invoice_id + '/');
-                      }, 1500);
-                      return;
-                    }
-
-                    // Extraction succeeded but needs review - show preview
-                    if (data && data.header){
-                      extractedInvoiceData = data;
-                      showExtractedDataPreview(data.header);
+                    if (!extractData.success){
                       uploadProgress.style.display = 'none';
+                      const errorMsg = extractData.message || 'Could not extract data from PDF.';
+                      showError(`<i class="fa fa-warning me-2"></i>${errorMsg}<br><small>Switch to <strong>Enter Manually</strong> tab to enter details.</small>`, false);
                       return;
                     }
 
-                    // Extraction failed - offer manual entry
+                    // Extraction successful - populate and show form
+                    extractedInvoiceData = extractData;
+                    populateManualFormWithExtracted(extractData);
+                    showExtractedDataPreview(extractData.header);
                     uploadProgress.style.display = 'none';
-                    const errorMsg = data.message || 'Could not extract data from PDF.';
-                    showError(`<i class="fa fa-info-circle me-2"></i>${errorMsg} Switch to <strong>Enter Manually</strong> tab to enter details.`, false);
+                    uploadProgressBar.style.width = '0%';
+
+                    // Auto-switch to manual tab to show confirmation form
+                    showSuccess('Invoice data extracted! Review and confirm customer details below.', false);
+                    setTimeout(() => {
+                      document.getElementById('invoiceManualTab').click();
+                    }, 500);
 
                   } catch (err){
                     console.error('Upload error:', err);
