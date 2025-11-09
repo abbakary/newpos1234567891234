@@ -303,27 +303,45 @@ def api_upload_extract_invoice(request):
         if items:
             for it in items:
                 try:
+                    # Extract and validate quantity
                     qty = it.get('qty') or 1
+                    try:
+                        qty = int(float(qty)) if qty else 1
+                    except (ValueError, TypeError):
+                        qty = 1
+
+                    # Ensure qty is at least 1
+                    if qty < 1:
+                        qty = 1
+
+                    # Extract unit price (value or rate)
                     unit_price = it.get('value') or it.get('rate') or Decimal('0')
+                    try:
+                        if isinstance(unit_price, (int, float)):
+                            unit_price = Decimal(str(unit_price))
+                        elif isinstance(unit_price, str):
+                            unit_price = Decimal(unit_price.replace(',', ''))
+                        elif unit_price is None:
+                            unit_price = Decimal('0')
+                    except (ValueError, TypeError):
+                        unit_price = Decimal('0')
 
-                    # Ensure proper type conversion
-                    if qty is not None:
-                        try:
-                            qty = int(qty)
-                        except (ValueError, TypeError):
-                            qty = 1
+                    # Get item code and description
+                    item_code = (it.get('item_code') or it.get('code') or '').strip() or None
+                    description = (it.get('description') or 'Item').strip()
 
+                    # Create line item
                     line = InvoiceLineItem(
                         invoice=inv,
-                        code=it.get('item_code') or None,
-                        description=it.get('description') or 'Item',
-                        quantity=qty,
-                        unit=it.get('unit') or None,
+                        code=item_code,
+                        description=description,
+                        quantity=Decimal(str(qty)),
+                        unit=(it.get('unit') or '').strip() or None,
                         unit_price=unit_price
                     )
                     line.save()
                 except Exception as e:
-                    logger.warning(f"Failed to create invoice line item: {e}")
+                    logger.warning(f"Failed to create invoice line item from {it}: {e}")
 
         # Recalculate totals
         inv.calculate_totals()
