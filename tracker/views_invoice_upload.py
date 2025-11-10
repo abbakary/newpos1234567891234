@@ -282,10 +282,17 @@ def api_create_invoice_from_upload(request):
             inv.seller_tax_id = (request.POST.get('seller_tax_id') or '').strip() or None
             inv.seller_vat_reg = (request.POST.get('seller_vat_reg') or '').strip() or None
 
-            # Parse amounts
-            subtotal = Decimal(str(request.POST.get('subtotal', '0') or '0').replace(',', ''))
-            tax_amount = Decimal(str(request.POST.get('tax_amount', '0') or '0').replace(',', ''))
-            total_amount = Decimal(str(request.POST.get('total_amount', '0') or '0').replace(',', ''))
+            # Parse amounts (support multiple possible field names)
+            def _dec(val):
+                s = str(val or '0')
+                try:
+                    return Decimal(s.replace(',', ''))
+                except Exception:
+                    return Decimal('0')
+
+            subtotal = _dec(request.POST.get('subtotal') or request.POST.get('net_value'))
+            tax_amount = _dec(request.POST.get('tax_amount') or request.POST.get('tax') or request.POST.get('vat'))
+            total_amount = _dec(request.POST.get('total_amount') or request.POST.get('total') or request.POST.get('gross_value'))
 
             inv.subtotal = subtotal
             inv.tax_amount = tax_amount
@@ -302,29 +309,59 @@ def api_create_invoice_from_upload(request):
             item_codes = request.POST.getlist('item_code[]')
             item_units = request.POST.getlist('item_unit[]')
 
+            # Aggregate duplicates by code (fallback to description) before creating lines
+            bucket = {}
+            total_items = 0
             for idx, desc in enumerate(item_descriptions):
-                if desc and desc.strip():
+                if not desc or not desc.strip():
+                    continue
+                total_items += 1
+                try:
+                    code = item_codes[idx].strip() if idx < len(item_codes) and item_codes[idx] else ''
+                    key = code or desc.strip().lower()
+                    qty = int(item_qtys[idx] or 1) if idx < len(item_qtys) else 1
                     try:
-                        qty = int(item_qtys[idx] or 1) if idx < len(item_qtys) else 1
                         price = Decimal(str(item_prices[idx] or '0').replace(',', '')) if idx < len(item_prices) else Decimal('0')
-                        code = item_codes[idx].strip() if idx < len(item_codes) and item_codes[idx] else None
-                        unit = item_units[idx].strip() if idx < len(item_units) and item_units[idx] else None
+                    except Exception:
+                        price = Decimal('0')
+                    unit = item_units[idx].strip() if idx < len(item_units) and item_units[idx] else None
+                    if key not in bucket:
+                        bucket[key] = {
+                            'code': code or None,
+                            'description': desc.strip(),
+                            'qty': 0,
+                            'unit': unit,
+                            'unit_price': price,
+                        }
+                    bucket[key]['qty'] += max(1, qty)
+                    # Prefer first non-zero price; otherwise keep existing
+                    if (bucket[key]['unit_price'] or Decimal('0')) == Decimal('0') and price:
+                        bucket[key]['unit_price'] = price
+                    if not bucket[key]['unit'] and unit:
+                        bucket[key]['unit'] = unit
+                except Exception as e:
+                    logger.warning(f"Failed to stage line item aggregation: {e}")
 
-                        line = InvoiceLineItem(
-                            invoice=inv,
-                            code=code,
-                            description=desc.strip(),
-                            quantity=qty,
-                            unit=unit,
-                            unit_price=price
-                        )
-                        line.save()
-                    except Exception as e:
-                        logger.warning(f"Failed to create line item: {e}")
-            
-            # Recalculate totals
-            inv.calculate_totals()
-            inv.save()
+            for v in bucket.values():
+                try:
+                    line = InvoiceLineItem(
+                        invoice=inv,
+                        code=v['code'],
+                        description=v['description'],
+                        quantity=v['qty'] or 1,
+                        unit=v['unit'],
+                        unit_price=v['unit_price'] or Decimal('0')
+                    )
+                    line.save()
+                except Exception as e:
+                    logger.warning(f"Failed to create aggregated line item: {e}")
+
+            # Recalculate totals only if items were provided; otherwise keep posted totals
+            if inv.line_items.exists():
+                inv.calculate_totals()
+                inv.save()
+            else:
+                inv.save()
             
             # Create payment record if total > 0
             if inv.total_amount > 0:
