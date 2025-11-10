@@ -75,14 +75,20 @@ def api_search_started_orders(request):
 @require_http_methods(["POST"])
 def api_upload_extract_invoice(request):
     """
-    API endpoint to upload an invoice image/pdf, run local OCR+parsing, and create Invoice+Items.
+    Upload an invoice file and extract structured data.
+
+    Default is PREVIEW-ONLY (no records created). Send commit=true to persist
+    and link to a started order.
+
     Optional POST fields:
-      - selected_order_id: to link to an existing started order
-      - plate: plate number to match started order or create temp customer
-    Behavior:
-      - If extracted customer name matches existing customer (by full_name, branch), auto-link and finalize order.
-      - If no match but plate provided, create a temporary customer (Plate {plate}) and create order.
-      - If no match and no plate, return parsed data for manual review.
+      - selected_order_id: to link to an existing started order (when commit=true)
+      - plate: plate number to match started order or create temp customer (when commit=true)
+      - commit: 'true' to create Invoice + Items; otherwise only preview is returned.
+
+    When commit=true:
+      - Links to an existing started order when possible, otherwise creates a new order for real customers.
+      - Preserves extracted Net (subtotal), VAT (tax_amount) and Gross (total_amount). If no items were parsed,
+        totals are kept as-is to ensure KPIs sum correctly.
     """
     from tracker.utils.invoice_extractor import extract_from_bytes
     import traceback
@@ -127,7 +133,19 @@ def api_upload_extract_invoice(request):
     items = extracted.get('items') or []
     raw_text = extracted.get('raw_text') or ''
 
-    # Get selected_order_id and plate from POST
+    # If commit flag not provided, return preview only
+    commit = str(request.POST.get('commit', '')).lower() == 'true'
+    if not commit:
+        return JsonResponse({
+            'success': True,
+            'mode': 'preview',
+            'header': header,
+            'items': items,
+            'raw_text': raw_text,
+            'ocr_available': extracted.get('ocr_available', False)
+        })
+
+    # Get selected_order_id and plate from POST (commit path only)
     selected_order_id = request.POST.get('selected_order_id') or None
     plate = (request.POST.get('plate') or '').strip().upper() or None
 
@@ -322,72 +340,73 @@ def api_upload_extract_invoice(request):
         inv.generate_invoice_number()
         inv.save()
 
-        # Create line items from extraction
-        if items:
-            for it in items:
+        # Aggregate duplicate line items by code (fallback to description) before creation
+        def _aggregate_items(items_list):
+            bucket = {}
+            for it in items_list:
+                desc = (it.get('description') or 'Item').strip()
+                code = (it.get('item_code') or it.get('code') or '').strip()
+                key = code or desc.lower()
                 try:
-                    # Extract and validate quantity
-                    qty = it.get('qty') or 1
+                    qty = Decimal(str(it.get('qty') or 1))
+                except Exception:
+                    qty = Decimal('1')
+                unit = (it.get('unit') or '').strip() or None
+                # Prefer provided unit price (rate); fallback to total value per qty
+                rate = it.get('rate')
+                try:
+                    value = Decimal(str(it.get('value'))) if it.get('value') is not None else None
+                except Exception:
+                    value = None
+                if key not in bucket:
+                    bucket[key] = {
+                        'code': code or None,
+                        'description': desc,
+                        'qty': Decimal('0'),
+                        'unit': unit,
+                        'rate_pref': rate,
+                        'value_sum': Decimal('0')
+                    }
+                bucket[key]['qty'] += qty
+                if not bucket[key]['unit'] and unit:
+                    bucket[key]['unit'] = unit
+                if value is not None:
+                    bucket[key]['value_sum'] += value
+            out = []
+            for v in bucket.values():
+                qty = v['qty'] if v['qty'] > 0 else Decimal('1')
+                # Determine unit price
+                unit_price = None
+                if v['rate_pref'] is not None:
                     try:
-                        qty = float(qty) if qty else 1
-                    except (ValueError, TypeError):
-                        qty = 1
+                        unit_price = Decimal(str(v['rate_pref']))
+                    except Exception:
+                        unit_price = None
+                if unit_price is None:
+                    unit_price = (v['value_sum'] / qty) if v['value_sum'] else Decimal('0')
+                out.append({
+                    'code': v['code'],
+                    'description': v['description'],
+                    'qty': qty,
+                    'unit': v['unit'],
+                    'unit_price': unit_price,
+                })
+            return out
 
-                    # Ensure qty is at least 1
-                    if qty < 1:
-                        qty = 1
-
-                    # Extract unit price - prefer 'rate' (unit price), fallback to calculated from value/qty
-                    unit_price = it.get('rate')
-                    if not unit_price:
-                        # If rate not available, try to calculate from value and qty
-                        value = it.get('value')
-                        if value and qty > 0:
-                            try:
-                                value_dec = Decimal(str(value).replace(',', '')) if isinstance(value, str) else Decimal(str(value))
-                                unit_price = value_dec / Decimal(str(qty))
-                            except (ValueError, TypeError, Exception):
-                                unit_price = Decimal('0')
-                        else:
-                            unit_price = Decimal('0')
-
-                    # Convert unit_price to Decimal
-                    try:
-                        if isinstance(unit_price, (int, float)):
-                            unit_price = Decimal(str(unit_price))
-                        elif isinstance(unit_price, str):
-                            unit_price = Decimal(unit_price.replace(',', ''))
-                        elif unit_price is None:
-                            unit_price = Decimal('0')
-                    except (ValueError, TypeError):
-                        unit_price = Decimal('0')
-
-                    # Get item code and description
-                    item_code = (it.get('item_code') or it.get('code') or '').strip() or None
-                    description = (it.get('description') or 'Item').strip()
-
-                    # Skip header-like rows accidentally parsed as items (e.g., "Customer Name", "Address", etc.)
-                    desc_l = description.lower()
-                    header_keywords = [
-                        'customer name', 'address', 'tel', 'telephone', 'fax', 'email', 'date',
-                        'code', 'code no', 'reference', 'pi no', 'kind attn', 'attended by', 'notes',
-                        'delivery', 'payment', 'vat', 'gross value', 'net value', 'subtotal', 'total'
-                    ]
-                    if any(desc_l == k or desc_l.startswith(k) for k in header_keywords):
-                        continue
-
-                    # Create line item with proper unit_price
-                    line = InvoiceLineItem(
-                        invoice=inv,
-                        code=item_code,
-                        description=description,
-                        quantity=Decimal(str(qty)),
-                        unit=(it.get('unit') or '').strip() or None,
-                        unit_price=unit_price
-                    )
-                    line.save()
-                except Exception as e:
-                    logger.warning(f"Failed to create invoice line item from {it}: {e}")
+        aggregated = _aggregate_items(items) if items else []
+        for it in aggregated:
+            try:
+                line = InvoiceLineItem(
+                    invoice=inv,
+                    code=it.get('code') or None,
+                    description=it.get('description') or 'Item',
+                    quantity=it.get('qty') or Decimal('1'),
+                    unit=it.get('unit') or None,
+                    unit_price=it.get('unit_price') or Decimal('0')
+                )
+                line.save()
+            except Exception as e:
+                logger.warning(f"Failed to create invoice line item from aggregated {it}: {e}")
 
         # Recalculate totals only if we have line items
         # If no line items were created from extraction, preserve the extracted totals
