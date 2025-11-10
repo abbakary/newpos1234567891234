@@ -197,8 +197,8 @@
 
                   <div class="col-md-6">
                     <label class="form-label">Customer Name</label>
-                    {{ form.customer_full_name }}
-                    {% if form.customer_full_name.errors %}<div class="text-danger f-12">{{ form.customer_full_name.errors|striptags }}</div>{% endif %}
+                    {{ form.customer_name }}
+                    {% if form.customer_name.errors %}<div class="text-danger f-12">{{ form.customer_name.errors|striptags }}</div>{% endif %}
                   </div>
 
                   <div class="col-md-6">
@@ -796,7 +796,7 @@
                     if (!f) return;
 
                     const map = {
-                      'customer_full_name': hdr.customer_name || '',
+                      'customer_name': hdr.customer_name || '',
                       'customer_phone': hdr.phone || '',
                       'customer_email': hdr.email || '',
                       'customer_address': hdr.address || '',
