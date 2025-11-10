@@ -331,26 +331,40 @@ def parse_invoice_data(text: str) -> dict:
         # Address must have indicators OR have numbers and multiple parts
         return has_indicators or (has_numbers and has_multipart and len(text) > 5)
 
-    # Extract customer name - more careful pattern matching
+    # Extract customer name - improved pattern matching for Superdoll format
     customer_name = None
 
-    # First try the exact "Customer Name" pattern with or without colon
-    # Pattern 1: "Customer Name: VALUE" or "Customer NameVALUE"
-    m = re.search(r'Customer\s*Name\s*[:=]?\s*([^\n:{{]+?)(?=\n(?:Address|Tel|Attended|Kind|Reference|PI|Code)|$)', normalized_text, re.I | re.MULTILINE | re.DOTALL)
+    # Strategy 1: Look for "Customer Name :" with proper word boundary and capture the full name up to next section
+    # Must look for the exact format where "Customer Name" is followed by actual company name
+    m = re.search(r'Customer\s*Name\s*:?\s*([^\n:]+?)(?=\n(?:Address|P\.O|Tel|Fax|Email|Attended|Kind|Reference|PI|Code|Cust|Del)\s*[:=]|\n(?:P\.O\.BOX|TANZANIA|DAR))', normalized_text, re.I | re.MULTILINE)
     if m:
         customer_name = m.group(1).strip()
-        # Clean up any trailing field indicators
-        customer_name = re.sub(r'\s+(?:Address|Tel|Phone|Fax|Email|Attended|Kind|Ref)\b.*$', '', customer_name, flags=re.I).strip()
+        # Clean up: remove any trailing "Reference" or field labels
+        customer_name = re.sub(r'\s+(?:Reference|Ref\.?|Address|Tel|Phone|Fax|Email|Attended|Kind|Code|PI|Date|Cust|Del\.|Type)\b.*$', '', customer_name, flags=re.I).strip()
+        # Validate: customer name should not be just numbers or "Reference"
+        if customer_name and customer_name.upper() != 'REFERENCE' and not re.match(r'^\d+', customer_name):
+            pass
+        else:
+            customer_name = None
 
-    # Pattern 2: Handle case where Customer Name appears on same line as value (no separator)
+    # Strategy 2: Look for lines that have customer name pattern - company names usually have LTD, CO, INC, etc.
     if not customer_name:
-        m = re.search(r'Customer\s*Name\s+([A-Z][^\n]+?)(?=\n|$)', normalized_text, re.I | re.MULTILINE)
-        if m:
-            customer_name = m.group(1).strip()
-            # Clean up trailing labels
-            customer_name = re.sub(r'\s+(?:Address|Tel|Phone|Fax|Code|PI|Date)\b.*$', '', customer_name, flags=re.I).strip()
+        lines_data = normalized_text.split('\n')
+        for i, line in enumerate(lines_data):
+            if re.search(r'Customer\s*Name\s*:?', line, re.I):
+                # The customer name is in this line or the next few lines
+                for j in range(i, min(i + 4, len(lines_data))):
+                    candidate = lines_data[j].strip()
+                    # Skip the label itself
+                    candidate = re.sub(r'^Customer\s*Name\s*:?\s*', '', candidate, flags=re.I).strip()
+                    # Check if it looks like a customer name (has company indicators or multiple words)
+                    if candidate and is_likely_customer_name(candidate) and len(candidate) > 3:
+                        customer_name = candidate
+                        break
+                if customer_name:
+                    break
 
-    # If still not found, try alternative patterns
+    # Strategy 3: Alternative patterns if above fails
     if not customer_name:
         customer_name = extract_field_value([
             r'Bill\s*To',
