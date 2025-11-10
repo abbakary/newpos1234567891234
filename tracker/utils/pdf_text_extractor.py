@@ -849,29 +849,29 @@ def parse_invoice_data(text: str) -> dict:
                         if first_code_match:
                             item_code = first_code_match.group(1)
 
-                    # Extract description (text before the numbers start appearing significantly)
-                    # Strategy: Take the text portion before the main numeric data begins
-                    desc_match = re.match(r'^[^0-9]*?([A-Z][A-Za-z\s\-/\.]*?)(?=\s*(?:\d{1,2}\s+)?(?:PCS|NOS|UNT|KG|HR|LTR|PIECES|UNITS|KIT|BOX|CASE|SETS|PC)?(?:\s*\d+[,\.\d]*)?)', description_text, re.I)
-                    if desc_match:
-                        full_description = desc_match.group(1).strip()
-                    else:
-                        # Fallback: extract non-numeric parts, but be smarter about it
-                        # Split by large number patterns to separate description from amounts
-                        parts = re.split(r'\s{2,}|\s+(?=\d{2,})', description_text)
-                        # Take first parts as description (usually they're the text parts)
-                        desc_parts = []
-                        for part in parts:
-                            # Stop if we hit a part that's mostly numbers
-                            if re.match(r'^\d+', part) and len(part) < 15:
-                                break
-                            # Take parts with actual text/letters
-                            if re.search(r'[A-Za-z]', part):
-                                desc_parts.append(part)
-                            elif not part.strip():
-                                continue
-                            else:
-                                break
-                        full_description = ' '.join(desc_parts).strip() if desc_parts else description_text.split()[0] if description_text.split() else ''
+                    # Extract description (text portion, typically before large numeric values like rates/amounts)
+                    # Look for the last sequence of letters/words before significant numbers
+                    full_description = ''
+                    words = description_text.split()
+                    for i, word in enumerate(words):
+                        # Stop when we hit a large number (amounts typically > 1000 or have comma/decimal)
+                        if re.match(r'^\d+[\,\.]\d+', word) or (len(word) > 8 and re.match(r'^\d+', word)):
+                            # Stop here - everything before is description
+                            full_description = ' '.join(words[:i]).strip()
+                            break
+                        # Also check for unit keywords which typically come after description
+                        elif re.match(r'^(PCS|NOS|KG|HR|LTR|PIECES|UNITS|KIT|BOX|CASE|SETS|PC|UNT)$', word, re.I):
+                            # Unit found - description is everything before
+                            full_description = ' '.join(words[:i]).strip()
+                            break
+
+                    # If we didn't find a stopping point, use all words with letters
+                    if not full_description:
+                        desc_words = [w for w in words if re.search(r'[A-Za-z]', w)]
+                        if desc_words:
+                            full_description = ' '.join(desc_words[:min(10, len(desc_words))]).strip()
+                        else:
+                            full_description = words[0] if words else ''
 
                     # Clean up description
                     full_description = re.sub(r'\s+', ' ', full_description).strip()
