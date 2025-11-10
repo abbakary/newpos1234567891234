@@ -948,6 +948,11 @@
                     kindAttnField.value = header.kind_attention || '';
                   }
 
+                  const notesField = manualForm.querySelector('textarea[name="notes"]');
+                  if (notesField){
+                    notesField.value = header.notes || '';
+                  }
+
                   // Clear existing line items and add extracted ones
                   const existingItems = lineItemsContainer.querySelectorAll('.line-item-row');
                   if (existingItems.length > 0){
