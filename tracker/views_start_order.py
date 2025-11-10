@@ -526,6 +526,158 @@ def started_order_detail(request, order_id):
     return render(request, 'tracker/started_order_detail.html', context)
 
 
+@login_required
+@require_http_methods(["POST"])
+def api_create_order_from_modal(request):
+    """
+    Create order from modal form submission.
+    Accepts form data with order type, customer type, and extracted details.
+
+    Form fields:
+      - order_type: 'service', 'sales', 'inquiry', or 'upload'
+      - customer_type: 'personal', 'company', 'government', 'ngo'
+      - personal_subtype: 'owner' or 'driver' (for personal customers)
+      - organization_name: (required for organizational customers)
+      - tax_number: (required for organizational customers)
+      - customer_name: full name
+      - phone: phone number
+      - email: email (optional)
+      - address: address (optional)
+      - description: order description
+      - estimated_duration: minutes
+      - priority: low, medium, high, urgent
+      - plate_number: vehicle plate (optional)
+      - vehicle_make: vehicle make (optional)
+      - vehicle_model: vehicle model (optional)
+    """
+    try:
+        user_branch = get_user_branch(request.user)
+
+        # Extract form data
+        order_type = request.POST.get('order_type', 'service').strip()
+        customer_type = request.POST.get('customer_type', 'personal').strip()
+        personal_subtype = request.POST.get('personal_subtype', '').strip()
+        organization_name = request.POST.get('organization_name', '').strip()
+        tax_number = request.POST.get('tax_number', '').strip()
+
+        customer_name = request.POST.get('customer_name', '').strip()
+        phone = request.POST.get('phone', '').strip()
+        email = request.POST.get('email', '').strip()
+        address = request.POST.get('address', '').strip()
+
+        description = request.POST.get('description', '').strip()
+        estimated_duration = request.POST.get('estimated_duration', '').strip()
+        priority = request.POST.get('priority', 'medium').strip()
+
+        plate_number = request.POST.get('plate_number', '').strip().upper()
+        vehicle_make = request.POST.get('vehicle_make', '').strip()
+        vehicle_model = request.POST.get('vehicle_model', '').strip()
+
+        # Validate required fields
+        if not customer_name or not phone:
+            return JsonResponse({
+                'success': False,
+                'error': 'Customer name and phone are required'
+            }, status=400)
+
+        if order_type not in ['service', 'sales', 'inquiry', 'upload']:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid order type'
+            }, status=400)
+
+        if customer_type not in ['personal', 'company', 'government', 'ngo']:
+            return JsonResponse({
+                'success': False,
+                'error': 'Invalid customer type'
+            }, status=400)
+
+        # Validate customer type specific fields
+        if customer_type == 'personal' and not personal_subtype:
+            return JsonResponse({
+                'success': False,
+                'error': 'Personal subtype is required for personal customers'
+            }, status=400)
+
+        if customer_type in ['company', 'government', 'ngo']:
+            if not organization_name or not tax_number:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Organization name and tax number are required'
+                }, status=400)
+
+        with transaction.atomic():
+            from .services import CustomerService, VehicleService
+
+            # Create or get customer
+            if customer_type == 'personal':
+                customer, _ = CustomerService.create_or_get_customer(
+                    branch=user_branch,
+                    full_name=customer_name,
+                    phone=phone,
+                    customer_type=customer_type,
+                    personal_subtype=personal_subtype,
+                    email=email or None,
+                    address=address or None,
+                )
+            else:
+                customer, _ = CustomerService.create_or_get_customer(
+                    branch=user_branch,
+                    full_name=customer_name,
+                    phone=phone,
+                    customer_type=customer_type,
+                    organization_name=organization_name,
+                    tax_number=tax_number,
+                    email=email or None,
+                    address=address or None,
+                )
+
+            # Create or get vehicle if plate is provided
+            vehicle = None
+            if plate_number:
+                vehicle = VehicleService.create_or_get_vehicle(
+                    customer=customer,
+                    plate_number=plate_number,
+                    make=vehicle_make or None,
+                    model=vehicle_model or None,
+                )
+
+            # Parse estimated duration
+            try:
+                est_duration = int(estimated_duration) if estimated_duration else None
+            except (ValueError, TypeError):
+                est_duration = None
+
+            # Create order
+            order = Order.objects.create(
+                customer=customer,
+                vehicle=vehicle,
+                branch=user_branch,
+                type=order_type,
+                status='created',
+                started_at=timezone.now(),
+                description=description or f"Order for {customer_name}",
+                priority=priority if priority in ['low', 'medium', 'high', 'urgent'] else 'medium',
+                estimated_duration=est_duration,
+            )
+
+        # Return success response
+        return JsonResponse({
+            'success': True,
+            'message': 'Order created successfully',
+            'order_id': order.id,
+            'order_number': order.order_number,
+            'redirect_url': f'/tracker/orders/{order.id}/'
+        }, status=201)
+
+    except Exception as e:
+        logger.error(f"Error creating order from modal: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'error': f'Failed to create order: {str(e)}'
+        }, status=500)
+
+
 @require_http_methods(["POST"])
 @login_required
 def api_record_overrun_reason(request, order_id):
