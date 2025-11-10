@@ -394,62 +394,70 @@ def parse_invoice_data(text: str) -> dict:
     # Extract address - specifically look for P.O.BOX format
     address = None
 
-    # Split text into lines for easier processing
-    lines = [line.strip() for line in normalized_text.split('\n') if line.strip()]
+    # Split text into lines for easier processing (don't filter empty - preserve structure)
+    lines = [line.strip() for line in normalized_text.split('\n')]
+    lines = [l for l in lines if l]  # Now filter empty lines
 
-    # Pattern 1: Find P.O.BOX with the box number
+    # Pattern 1: Find P.O.BOX with the box number - handle various formats
     pob_match = None
     pob_line_idx = None
+    pob_text = None
+
     for idx, line in enumerate(lines):
-        if re.search(r'P\.?O\.?\s*BOX', line, re.I):
-            pob_match = re.search(r'P\.?O\.?\s*BOX\s*(\d+)', line, re.I)
-            pob_line_idx = idx
-            break
+        # Match P.O.BOX or P O BOX or POB patterns
+        if re.search(r'P\.?\s*O\.?\s*B|P\.?O\.?\s*BOX|POB|P\.O', line, re.I):
+            # Try to extract the box number
+            box_match = re.search(r'(?:P\.?\s*O\.?\s*B|P\.?O\.?\s*BOX|POB|P\.O).*?(\d{3,})', line, re.I)
+            if box_match:
+                pob_number = box_match.group(1)
+                pob_line_idx = idx
+                pob_text = line
+                # Construct the address starting with P.O.BOX
+                address_parts = [f"P.O.BOX {pob_number}"]
 
-    if pob_match:
-        # Found P.O.BOX, now collect address parts
-        pob_number = pob_match.group(1)
-        address_parts = [f"P.O.BOX {pob_number}"]
+                # Collect following lines for city/country
+                for j in range(idx + 1, min(idx + 5, len(lines))):
+                    next_line = lines[j].strip()
 
-        # Check lines immediately after for city/country (usually uppercase)
-        if pob_line_idx is not None:
-            for j in range(pob_line_idx + 1, min(pob_line_idx + 5, len(lines))):
-                next_line = lines[j]
-
-                # Stop if we hit a field label (lowercase or field names)
-                if re.match(r'^(?:Tel|Fax|Attended|Kind|Reference|PI|Code|Type|Date|Email|Phone|Del)', next_line, re.I):
-                    break
-
-                # Keep lines that look like address (uppercase, city names, country names, etc.)
-                if next_line and len(next_line) > 1:
-                    # Check for location indicators or all-caps format
-                    if re.search(r'\b(DAR|NAIROBI|KAMPALA|KIGALI|TANZANIA|KENYA|UGANDA|RWANDA|BURUNDI|SALAAM)\b', next_line, re.I) or \
-                       re.match(r'^[A-Z\s\-]+$', next_line):
-                        address_parts.append(next_line)
-                    elif next_line.isupper() or (len(next_line) > 5 and next_line[0].isupper() and ',' not in next_line):
-                        # Likely address line (starts with capital, no commas)
-                        address_parts.append(next_line)
-                    else:
-                        # Not an address line, stop
+                    # Stop at field labels
+                    if not next_line or re.match(r'^(?:Tel|Fax|Attended|Kind|Reference|PI|Code|Type|Date|Email|Phone|Del)', next_line, re.I):
                         break
 
-        address = ' '.join(address_parts).strip()
-        if len(address) < 8:  # Must be longer than just "P.O.BOX XXX"
-            address = None
+                    # Keep location lines
+                    if re.search(r'\b(DAR|NAIROBI|KAMPALA|KIGALI|SALAAM|TANZANIA|KENYA|UGANDA|RWANDA|BURUNDI)\b', next_line, re.I):
+                        address_parts.append(next_line)
+                    elif len(next_line) > 2 and (next_line.isupper() or re.match(r'^[A-Z][A-Z\s\-]*$', next_line)):
+                        # Likely an address line (all caps or capitalized)
+                        address_parts.append(next_line)
+                    elif len(next_line) < 3:  # Very short, might be separator
+                        continue
+                    else:
+                        break  # Stop at other content
 
-    # Pattern 2: If P.O.BOX not found, look for city/country patterns
+                address = ' '.join(address_parts).strip()
+                if len(address) > 8:  # Must have more than just P.O.BOX
+                    break
+                else:
+                    address = None  # Reset if too short
+
+    # Pattern 2: If P.O.BOX not found, look for explicit address patterns
     if not address:
         for idx, line in enumerate(lines):
-            # Look for lines with known city/country names
-            if re.search(r'\b(DAR|DAR-ES-SALAAM|NAIROBI|KAMPALA|KIGALI)\b', line, re.I):
+            # Look for city names followed by country
+            if re.search(r'\b(DAR|DAR-ES-SALAAM|NAIROBI|KAMPALA)\b', line, re.I):
                 address_parts = [line]
-                # Check next line for country
-                if idx + 1 < len(lines):
-                    next_line = lines[idx + 1]
+                # Check next line(s) for country or additional address
+                for j in range(idx + 1, min(idx + 3, len(lines))):
+                    next_line = lines[j].strip()
                     if re.search(r'\b(TANZANIA|KENYA|UGANDA|RWANDA|BURUNDI)\b', next_line, re.I):
                         address_parts.append(next_line)
+                        break
+                    elif len(next_line) > 2 and not re.match(r'^(?:Tel|Fax|Email|Phone)', next_line, re.I):
+                        address_parts.append(next_line)
+                        break
                 address = ' '.join(address_parts).strip()
-                break
+                if address:
+                    break
 
     # Smart fix: If customer_name is empty but address looks like it contains the name
     # Try to split the address and extract name from first line
@@ -465,45 +473,29 @@ def parse_invoice_data(text: str) -> dict:
             if not address or len(address) < 3:
                 address = None
 
-    # Extract phone/tel - look for "Tel:" specifically
+    # Extract phone/tel - look for "Tel:" or "Tel " specifically
     phone = None
 
-    # Pattern 1: Look for lines that have "Tel :" or "Tel=" followed by actual phone content
-    # Must have the Tel label and actual phone data
-    lines_data = [line.strip() for line in normalized_text.split('\n') if line.strip()]
-
-    for idx, line in enumerate(lines_data):
-        # Look for "Tel :" or "Tel=" on a line
-        if re.search(r'\bTel\s*[:=]', line, re.I):
-            # Extract what comes after "Tel :"
-            tel_match = re.search(r'\bTel\s*[:=]\s*([^\n]+?)(?:\s*Fax|$)', line, re.I)
+    # Use the same lines array as address extraction for consistency
+    for idx, line in enumerate(lines):
+        # Look for "Tel" on a line (with optional colon/equals)
+        if re.search(r'\bTel\b', line, re.I):
+            # Extract what comes after "Tel"
+            # Try multiple patterns to be flexible
+            tel_match = re.search(r'\bTel\s*[:=]?\s*([^\n]+?)(?:\s*(?:Fax|Email|Del|Attended|Kind|Reference)|$)', line, re.I)
             if tel_match:
                 phone_candidate = tel_match.group(1).strip()
 
-                # Clean up: remove field labels
-                phone_candidate = re.sub(r'\s+(?:Fax|Email|Del|Attended|Kind|Reference).*', '', phone_candidate, flags=re.I).strip()
+                # Clean up: remove trailing field labels
+                phone_candidate = re.sub(r'\s+(?:Fax|Email|Del|Attended|Kind|Reference)\s*.*$', '', phone_candidate, flags=re.I).strip()
 
-                # Must have some actual content (not just spaces or labels)
-                if phone_candidate and len(phone_candidate) > 2 and phone_candidate.lower() not in ['fax', 'email', 'date']:
-                    # If contains slash, keep first part (usually main phone)
-                    if '/' in phone_candidate:
-                        phone_candidate = phone_candidate.split('/')[0].strip()
+                # Must have some actual content
+                if phone_candidate and len(phone_candidate) > 1:
+                    # Remove leading/trailing non-alphanumeric except for +, -, /, spaces, ()
+                    phone_candidate = re.sub(r'^[^\w\+\-\(]|[^\w\)]$', '', phone_candidate).strip()
 
-                    # Accept if it has digits or is a meaningful value
-                    if re.search(r'\d', phone_candidate) or len(phone_candidate) > 5:
-                        phone = phone_candidate
-                        break
-
-    # Pattern 2: If not found yet, look for "Telephone" or "Phone" labels
-    if not phone:
-        for line in lines_data:
-            if re.search(r'\b(?:Telephone|Phone|Cell|Mobile)\s*[:=]', line, re.I):
-                tel_match = re.search(r'\b(?:Telephone|Phone|Cell|Mobile)\s*[:=]\s*([^\n]+?)$', line, re.I)
-                if tel_match:
-                    phone_candidate = tel_match.group(1).strip()
-                    # Remove trailing labels
-                    phone_candidate = re.sub(r'\s+(?:Fax|Email).*', '', phone_candidate, flags=re.I).strip()
-                    if phone_candidate and len(phone_candidate) > 2:
+                    # Accept if it has digits or is long enough to be a phone
+                    if re.search(r'\d', phone_candidate) and len(phone_candidate) > 2:
                         phone = phone_candidate
                         break
 
