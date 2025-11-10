@@ -334,21 +334,23 @@ def parse_invoice_data(text: str) -> dict:
     # Extract customer name - improved pattern matching for Superdoll format
     customer_name = None
 
-    # Strategy 1: Look for "Customer Name" followed by the actual customer name
-    # Pattern: Customer Name : <value> or Customer Name<value>
-    # Capture until we hit a line with just a label or until next section
-    m = re.search(r'Customer\s+Name\s*[:=]?\s*([^\n]+?)(?=\n|$)', normalized_text, re.I | re.MULTILINE)
+    # Strategy 1: Look for "Customer Name" label and extract ONLY what comes after it
+    # The key is to extract ONLY the customer name, not the label itself
+    # Handle formats like: "Customer Name : VALUE" or "Customer Name VALUE"
+    m = re.search(r'Customer\s+Name\s*[:=]?\s*([A-Z][^\n]*?)(?=\n|$)', normalized_text, re.I | re.MULTILINE)
     if m:
         customer_name = m.group(1).strip()
 
-        # Clean up: remove any trailing field labels that might have been included
-        # This handles cases like "SAID SALIM BAKHRESA CO LTD Customer Name"
-        customer_name = re.sub(r'\s+(?:Customer|Name|Reference|Ref\.?|Address|Tel|Phone|Fax|Email|Attended|Kind|Code|PI|Date|Cust|Del\.|Type)\s*(?:Name|No|Number)?.*$', '', customer_name, flags=re.I).strip()
+        # Remove "Customer Name" or "Customer" if it appears at the end (due to scrambled OCR)
+        customer_name = re.sub(r'\s+Customer\s*Name?.*$', '', customer_name, flags=re.I).strip()
 
-        # Validate: customer name should not be just numbers or "Reference"
-        if customer_name and customer_name.upper() != 'REFERENCE' and not re.match(r'^\d+', customer_name) and len(customer_name) > 3:
-            # Double-check it's not just field labels
-            if not re.match(r'^(?:Address|Tel|Fax|Email|Phone)\b', customer_name, re.I):
+        # Remove other field labels that might have been included
+        customer_name = re.sub(r'\s+(?:Reference|Ref\.?|Address|Tel|Phone|Fax|Email|Attended|Kind|Code|PI|Date|Cust|Del\.|Type|Qty|Rate|Value)\b.*$', '', customer_name, flags=re.I).strip()
+
+        # Validate: customer name should have company indicators or be reasonably formatted
+        if customer_name and len(customer_name) > 3 and customer_name.upper() not in ['REFERENCE', 'ADDRESS', 'TEL', 'FAX', 'EMAIL']:
+            # Must not be a field label
+            if not re.match(r'^(?:Address|Tel|Fax|Email|Phone|Reference)\b', customer_name, re.I):
                 pass
             else:
                 customer_name = None
