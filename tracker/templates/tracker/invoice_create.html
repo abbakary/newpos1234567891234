@@ -828,6 +828,21 @@
                       }
                     });
 
+                    // Inject seller fields as hidden inputs so they are submitted with the form
+                    const sellerKeys = ['seller_name','seller_address','seller_phone','seller_email','seller_tax_id','seller_vat_reg'];
+                    sellerKeys.forEach(sk=>{
+                      const val = hdr[sk] || '';
+                      if (!val) return;
+                      let inp = f.querySelector('[name="'+sk+'"]');
+                      if (!inp) {
+                        inp = document.createElement('input');
+                        inp.type = 'hidden';
+                        inp.name = sk;
+                        f.appendChild(inp);
+                      }
+                      inp.value = val;
+                    });
+
                     if (hdr.date) {
                       const dateEl = f.querySelector('[name="invoice_date"]');
                       if (dateEl) {
